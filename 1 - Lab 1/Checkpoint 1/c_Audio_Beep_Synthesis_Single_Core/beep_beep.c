@@ -125,7 +125,8 @@ static void alarm_irq(void) {
         }
 
         // Mask with DAC control bits
-        DAC_data_0 = (DAC_config_chan_B | (DAC_output_0 & 0xffff))  ; // Change DAC_config_chan_B to DAC_config_chan_A would change the channel
+        // DAC_data_0 = (DAC_config_chan_B | (DAC_output_0 & 0xffff))  ; // Change DAC_config_chan_B to DAC_config_chan_A would change the channel
+        DAC_data_0 = (DAC_config_chan_A | (DAC_output_0 & 0xffff))  ;
 
         // SPI write (no spinlock b/c of SPI buffer)
         spi_write16_blocking(SPI_PORT, &DAC_data_0, 1) ;

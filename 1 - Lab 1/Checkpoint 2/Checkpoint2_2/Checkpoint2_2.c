@@ -65,24 +65,24 @@ volatile bool beep_trigger = false ;
 
 // Macros for fixed-point arithmetic (faster than floating point)
 typedef signed int fix15 ;
-#define multfix15(a,b) ((fix15)((((signed long long)(a))*((signed long long)(b)))>>15))
-#define float2fix15(a) ((fix15)((a)*32768.0)) 
-#define fix2float15(a) ((float)(a)/32768.0)
-#define absfix15(a) abs(a) 
-#define int2fix15(a) ((fix15)(a << 15))
-#define fix2int15(a) ((int)(a >> 15))
-#define char2fix15(a) (fix15)(((fix15)(a)) << 15)
+#define multfix15(a,b) ((fix15)((((signed long long)(a))*((signed long long)(b)))>>15))  // 定点数计算，保留15位浮点数运算
+#define float2fix15(a) ((fix15)((a)*32768.0)) //定点数计算，固定*32768，保留15位浮点数运算
+#define fix2float15(a) ((float)(a)/32768.0) //浮点数运算
+#define absfix15(a) abs(a) //绝对值
+#define int2fix15(a) ((fix15)(a << 15)) //整数转定点数，左移15位
+#define fix2int15(a) ((int)(a >> 15)) //定点数转整数，右移15位
+#define char2fix15(a) (fix15)(((fix15)(a)) << 15) 
 #define divfix(a,b) (fix15)( (((signed long long)(a)) << 15) / (b))
 
 //Direct Digital Synthesis (DDS) parameters
 #define two32 4294967296.0  // 2^32 (a constant)
-#define Fs 50000
-#define DELAY 20 // 1/Fs (in microseconds)
+#define Fs 50000 // Sampling Rate
+#define DELAY 20 // 1/Fs (in microseconds)， Period, time bewteen interrupts
 
 // the DDS units - core 0
 // Phase accumulator and phase increment. Increment sets output frequency.
 volatile unsigned int phase_accum_main_0;
-volatile unsigned int phase_incr_main_0 = (400.0*two32)/Fs ;
+volatile unsigned int phase_incr_main_0 = (400.0*two32)/Fs ; //Frequency output = 400.0Hz
 
 // DDS sine table (populated in main())
 #define sine_table_size 256
@@ -103,7 +103,7 @@ fix15 current_amplitude_1 = 0 ;         // current amplitude (modified in ISR)
 #define ATTACK_TIME             250
 #define DECAY_TIME              250
 #define SUSTAIN_TIME            10000
-#define BEEP_DURATION           10500
+#define BEEP_DURATION           10500 //完成一个beep的总时间 => 10500 * 20us = 0.21s
 #define BEEP_REPEAT_INTERVAL    50000
 
 // State machine variables
@@ -124,10 +124,10 @@ uint16_t DAC_data_0 ; // output value
 #define PIN_MISO 4
 #define PIN_CS   5
 #define PIN_SCK  6
-#define PIN_MOSI 7
+#define PIN_MOSI 7 //Not used, but needed to initialize SPI
 #define LDAC     8
 #define LED      25
-#define SPI_PORT spi0
+#define SPI_PORT spi0 //SPI Channel 0
 
 //GPIO for timing the ISR
 #define ISR_GPIO 2
@@ -138,42 +138,44 @@ uint16_t DAC_data_0 ; // output value
 static void alarm_irq(void) {
 
     // Assert a GPIO when we enter the interrupt
-    gpio_put(ISR_GPIO, 1) ;
+    gpio_put(ISR_GPIO, 1) ; //物理输出，指示中断开始
 
     // Clear the alarm irq
-    hw_clear_bits(&timer_hw->intr, 1u << ALARM_NUM);
+    hw_clear_bits(&timer_hw->intr, 1u << ALARM_NUM); //清除alarm中断标志
 
     // Reset the alarm register
-    timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY ;
+    timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY ; //重置下一次中断的计时器
 
     if (STATE_0 == 0) {
         // DDS phase and sine table lookup
-        phase_accum_main_0 += phase_incr_main_0  ;
-        DAC_output_0 = fix2int15(multfix15(current_amplitude_0,
-            sin_table[phase_accum_main_0>>24])) + 2048 ;
+        phase_accum_main_0 += phase_incr_main_0  ; //增加accumulator, 等于增加向量角度 
+        DAC_output_0 = fix2int15(multfix15(current_amplitude_0,  //右移24位只取向量角度的存储的前8位，基于向量角度前8位查找sin值 
+            sin_table[phase_accum_main_0>>24])) + 2048 ; //+2048是为了让输出值在0-4096之间，current_amplitude_0是定义当前振幅
 
         // Ramp up amplitude
-        if (count_0 < ATTACK_TIME) {
+        if (count_0 < ATTACK_TIME) { //上升沿，spectrum上的
             current_amplitude_0 = (current_amplitude_0 + attack_inc) ;
         }
         // Ramp down amplitude
-        else if (count_0 > BEEP_DURATION - DECAY_TIME) {
+        else if (count_0 > BEEP_DURATION - DECAY_TIME) { //下降沿，spectrum上的
             current_amplitude_0 = (current_amplitude_0 - decay_inc) ;
         }
 
         // Mask with DAC control bits
         DAC_data_0 = (DAC_config_chan_A | (DAC_output_0 & 0xffff))  ; // Change DAC_config_chan_B to DAC_config_chan_A would change the channel
+        //DAC_output_0 & 0xffff, 限制输出在16位以内  DAC_config_chan_a选定输出通道=>第15位
+
 
         // SPI write (no spinlock b/c of SPI buffer)
-        spi_write16_blocking(SPI_PORT, &DAC_data_0, 1) ;
+        spi_write16_blocking(SPI_PORT, &DAC_data_0, 1) ;//将spi数据通过SPI写入DAC
 
         // Increment the counter
-        count_0 += 1 ;
+        count_0 += 1 ; //count_0每次中断加1，irq触发次数计数器
 
         // State transition?
-        if (count_0 == BEEP_DURATION) {
-            STATE_0 = 1 ;
-            count_0 = 0 ;
+        if (count_0 == BEEP_DURATION) { //如果达到BEEP_DURATION，表示一个beep完成
+            STATE_0 = 1 ; //切换irq内状态
+            count_0 = 0 ; //计数器归零
             current_amplitude_0 = 0 ;
         }
     }
@@ -189,14 +191,15 @@ static void alarm_irq(void) {
     }
 
     // De-assert the GPIO when we leave the interrupt
-    gpio_put(ISR_GPIO, 0) ;
+    gpio_put(ISR_GPIO, 0) ; //物理输出，指示中断结束
 
 }
+
 // This thread runs on core 0
 static PT_THREAD (protothread_core_0(struct pt *pt))
 {
     // Indicate thread beginning
-    PT_BEGIN(pt) ;
+    PT_BEGIN(pt) ; //线程开始
 
     // Some variables
     static int i ;
@@ -222,9 +225,9 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
             for (i=0; i<NUMKEYS; i++) {
                 if (keypad == keycodes[i]) break ; //查找对应的key code
             }
-            if (i==NUMKEYS) (i = -1) ; //如果查找第12个yes，则表示没有找到对应的key code，返回-1
+            if (i==NUMKEYS) (i = -1) ;//如果查找第12个yes，则表示没有找到对应的key code，返回-1
         }
-        else (i=-1) ; //如果没有按键按下，返回-1
+        else (i=-1) ;//如果没有按键按下，返回-1
 
         // 状态机更新
         switch (key_status) {
@@ -238,7 +241,7 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
                 {
                     key_status = Pressed;                   //如果监测到keycode不为-1，表示有按键按下，进入Pressed状态
                     //printf("Key %d pressed\r\n", i) ;     //打印按键编号 -> 后续增加beep
-                    beep_trigger = true ;                      //触发beep Trigger
+                    beep_trigger = true ;                   //触发beep Trigger
                 }
                 break;
             case Pressed:
@@ -268,7 +271,7 @@ int main() {
     // Initialize SPI channel (channel, baud rate set to 20MHz)
     spi_init(SPI_PORT, 20000000) ;
     // Format (channel, data bits per transfer, polarity, phase, order)
-    spi_set_format(SPI_PORT, 16, 0, 0, 0);
+    spi_set_format(SPI_PORT, 16, 0, 0, 0); //16位spi message
 
     // Map SPI signals to GPIO ports
     gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
@@ -292,7 +295,7 @@ int main() {
     gpio_put(LED, 0) ;
 
     // set up increments for calculating bow envelope
-    attack_inc = divfix(max_amplitude, int2fix15(ATTACK_TIME)) ;
+    attack_inc = divfix(max_amplitude, int2fix15(ATTACK_TIME)) ; 
     decay_inc =  divfix(max_amplitude, int2fix15(DECAY_TIME)) ;
     // Build the sine lookup table
     // scaled to produce values between 0 and 4096 (for 12-bit DAC)

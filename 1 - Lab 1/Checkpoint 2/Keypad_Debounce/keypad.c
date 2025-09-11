@@ -79,12 +79,12 @@ static PT_THREAD (protothread_core_0(struct pt *pt))
             // Break if button(s) are pressed
             if (keypad & button) break ; //和0x70和运算，若结果不为0则表示有按键按下，跳出for循环
         }
-        // If we found a button . . .
+        // If we found a button . . . //！！FIX -> 同时按同一列的两个按键
         if (keypad & button) {
             for (i=0; i<NUMKEYS; i++) {
                 if (keypad == keycodes[i]) break ; //查找对应的key code
             }
-            if (i==NUMKEYS) (i = -1) ; //如果查找第12个yes，则表示没有找到对应的key code，返回-1
+            if (i==NUMKEYS) (i = -1) ; //如果查找第12个仍没有对应，则表示没有找到对应的key code，返回-1
         }
         else (i=-1) ; //如果没有按键按下，返回-1
 
